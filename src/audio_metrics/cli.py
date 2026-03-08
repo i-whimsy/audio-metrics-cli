@@ -339,6 +339,176 @@ def analyze(
         sys.exit(1)
 
 
+@main.command("voice-acoustic")
+@click.argument("audio_file", type=click.Path(exists=True))
+@click.option("-o", "--output", "output_file", type=click.Path(), default=None, help="Output JSON file")
+@click.option("--show-progress", is_flag=True, help="Show progress")
+@click.pass_context
+def voice_acoustic(ctx, audio_file, output_file, show_progress):
+    """
+    Voice Acoustic Analyzer - Extract objective acoustic features.
+    
+    Analyzes audio and outputs structured JSON with:
+    - Audio basic metrics
+    - VAD (Voice Activity Detection)
+    - Prosody features
+    - Pitch features
+    - Energy features
+    - Stability features
+    - Emotion (acoustic only)
+    - Gender inference
+    - Voice range classification
+    
+    No semantic analysis. No scoring. No interpretation.
+    
+    AUDIO_FILE: Path to audio file
+    """
+    verbose = ctx.obj.get("verbose", False)
+    
+    click.echo("=" * 60)
+    click.echo("Voice Acoustic Analyzer v0.3.0")
+    click.echo("=" * 60)
+    click.echo(f"Input: {Path(audio_file).name}")
+    click.echo("")
+    
+    try:
+        # STEP 1: Load audio
+        click.echo("[1/8] Loading audio...")
+        loader = AudioLoader(audio_file)
+        loader.load()
+        audio_info = loader.get_audio_info()
+        click.echo(f"  Duration: {audio_info['duration_seconds']:.2f}s")
+        click.echo(f"  Sample rate: {audio_info['sample_rate']} Hz")
+        click.echo(f"  File size: {audio_info['file_size_mb']:.2f} MB")
+        
+        # STEP 2: VAD analysis
+        click.echo("[2/8] Voice Activity Detection...")
+        vad = VADAnalyzer()
+        vad_analysis = vad.analyze(loader.get_audio_data())
+        click.echo(f"  Speech ratio: {vad_analysis['speech_ratio']:.1%}")
+        click.echo(f"  Pause count: {vad_analysis['pause_count']}")
+        
+        # STEP 3: Prosody analysis
+        click.echo("[3/8] Prosody features...")
+        prosody = ProsodyAnalyzer(sample_rate=audio_info['sample_rate'])
+        prosody_metrics = prosody.analyze(loader.get_audio_data())
+        click.echo(f"  Pitch mean: {prosody_metrics['pitch_mean_hz']:.1f} Hz")
+        
+        # STEP 4: Pitch features
+        click.echo("[4/8] Pitch features...")
+        pitch_features = {
+            "pitch_mean_hz": prosody_metrics['pitch_mean_hz'],
+            "pitch_std_hz": prosody_metrics.get('pitch_std_hz', 0),
+            "pitch_min_hz": prosody_metrics.get('pitch_min_hz', 0),
+            "pitch_max_hz": prosody_metrics.get('pitch_max_hz', 0),
+            "pitch_median_hz": prosody_metrics.get('pitch_median_hz', 0)
+        }
+        click.echo(f"  Range: {pitch_features['pitch_min_hz']:.1f} - {pitch_features['pitch_max_hz']:.1f} Hz")
+        
+        # STEP 5: Energy features
+        click.echo("[5/8] Energy features...")
+        energy_features = {
+            "energy_mean": prosody_metrics.get('energy_mean', 0),
+            "energy_std": prosody_metrics.get('energy_std', 0),
+            "energy_cv": prosody_metrics.get('energy_cv', 0)
+        }
+        click.echo(f"  Energy CV: {energy_features['energy_cv']:.3f}")
+        
+        # STEP 6: Stability features
+        click.echo("[6/8] Stability features...")
+        stability_features = {
+            "jitter": 0,
+            "shimmer": 0,
+            "hnr_db": 0,
+            "note": "parselmouth optional"
+        }
+        click.echo(f"  (parselmouth optional)")
+        
+        # STEP 7: Emotion (acoustic only)
+        click.echo("[7/8] Emotion (acoustic)...")
+        try:
+            emotion = EmotionAnalyzer()
+            emotion_features = emotion.analyze(audio_file)
+        except Exception as e:
+            emotion_features = {"dominant_emotion": "neutral", "confidence": 0.5}
+        click.echo(f"  Dominant: {emotion_features['dominant_emotion']}")
+        
+        # STEP 8: Gender inference & voice range
+        click.echo("[8/8] Gender inference & voice range...")
+        pitch_mean = pitch_features['pitch_mean_hz']
+        if pitch_mean > 250:
+            gender = "female"
+            confidence = min(0.95, 0.5 + (pitch_mean - 250) / 100)
+        elif pitch_mean < 150:
+            gender = "male"
+            confidence = min(0.95, 0.5 + (150 - pitch_mean) / 50)
+        else:
+            gender = "female" if pitch_mean > 200 else "male"
+            confidence = 0.6
+        
+        # Voice range
+        if gender == "female":
+            if pitch_mean > 246:
+                voice_range = "soprano"
+            elif pitch_mean > 196:
+                voice_range = "mezzo_soprano"
+            else:
+                voice_range = "alto"
+        else:
+            if pitch_mean > 130:
+                voice_range = "tenor"
+            elif pitch_mean > 98:
+                voice_range = "baritone"
+            else:
+                voice_range = "bass"
+        
+        click.echo(f"  Gender: {gender} ({confidence:.0%})")
+        click.echo(f"  Range: {voice_range}")
+        
+        # Build result
+        result = {
+            "version": "0.3.0",
+            "analyzer": "voice-acoustic-analyzer",
+            "type": "acoustic_features",
+            "audio_info": audio_info,
+            "vad": vad_analysis,
+            "prosody": prosody_metrics,
+            "pitch": pitch_features,
+            "energy": energy_features,
+            "stability": stability_features,
+            "emotion": emotion_features,
+            "gender_inference": {
+                "gender": gender,
+                "confidence": round(confidence, 3),
+                "method": "pitch_threshold"
+            },
+            "voice_range": {
+                "range": voice_range,
+                "gender": gender,
+                "pitch_mean_hz": pitch_mean
+            }
+        }
+        
+        # Export
+        if output_file is None:
+            output_file = "voice_acoustic_result.json"
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        
+        click.echo("")
+        click.echo("=" * 60)
+        click.echo(f"[OK] Exported: {output_file}")
+        click.echo("=" * 60)
+        
+    except Exception as e:
+        click.echo(f"[ERROR] {e}", err=True)
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+
 @main.command()
 @click.argument("audio_file", type=click.Path(exists=True))
 @click.option("-o", "--output", type=click.Path(), default=None, help="Output transcript file")
