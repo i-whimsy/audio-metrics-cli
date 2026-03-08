@@ -384,7 +384,7 @@ def voice_acoustic(ctx, audio_file, output_file, show_progress):
         # STEP 2: VAD analysis
         click.echo("[2/8] Voice Activity Detection...")
         vad = VADAnalyzer()
-        vad_analysis = vad.analyze(loader.get_audio_data())
+        vad_analysis = vad.analyze(loader.get_audio_data(), audio_info['sample_rate'])
         click.echo(f"  Speech ratio: {vad_analysis['speech_ratio']:.1%}")
         click.echo(f"  Pause count: {vad_analysis['pause_count']}")
         

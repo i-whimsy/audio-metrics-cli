@@ -60,12 +60,13 @@ class VADAnalyzer:
             logger.warning("Failed to load Silero VAD", error=str(e))
             self.model = None
     
-    def analyze(self, audio_data: np.ndarray) -> Dict[str, Any]:
+    def analyze(self, audio_data: np.ndarray, original_sr: int = None) -> Dict[str, Any]:
         """
         Analyze voice activity
         
         Args:
             audio_data: Audio data array
+            original_sr: Original sample rate (if already known)
             
         Returns:
             VAD analysis results
@@ -75,18 +76,22 @@ class VADAnalyzer:
             audio_data = np.mean(audio_data, axis=1)
         
         # Store original sample rate
-        original_sample_rate = self.sample_rate
+        if original_sr:
+            orig_sample_rate = original_sr
+        else:
+            orig_sample_rate = self.sample_rate
         
         # Resample to 16kHz if needed (Silero requirement)
-        if self.sample_rate != 16000:
+        if orig_sample_rate != 16000:
             # Simple resampling
-            num_samples = int(len(audio_data) * 16000 / self.sample_rate)
-            audio_data = np.interp(
+            num_samples = int(len(audio_data) * 16000 / orig_sample_rate)
+            audio_data_16k = np.interp(
                 np.linspace(0, len(audio_data), num_samples),
                 np.arange(len(audio_data)),
                 audio_data
             )
-            self.sample_rate = 16000
+        else:
+            audio_data_16k = audio_data
         
         # Load model if not loaded
         if self.model is None:
@@ -95,7 +100,7 @@ class VADAnalyzer:
         # Detect speech segments
         if self.model is not None:
             try:
-                audio_tensor = torch.from_numpy(audio_data).float()
+                audio_tensor = torch.from_numpy(audio_data_16k).float()
                 speech_timestamps = self.get_speech_timestamps(
                     audio_tensor,
                     self.model,
@@ -103,7 +108,7 @@ class VADAnalyzer:
                     sampling_rate=16000
                 )
                 
-                # Convert to seconds
+                # Convert to seconds (using 16k sample rate)
                 self.speech_segments = []
                 total_speech = 0
                 total_silence = 0
@@ -132,22 +137,18 @@ class VADAnalyzer:
                     prev_end = end
                 
                 # Calculate silence after last segment
-                audio_duration = len(audio_data) / 16000
-                if prev_end < audio_duration:
-                    total_silence += (audio_duration - prev_end)
+                audio_duration_16k = len(audio_data_16k) / 16000
+                if prev_end < audio_duration_16k:
+                    total_silence += (audio_duration_16k - prev_end)
                 
             except Exception as e:
                 print(f"Warning: VAD analysis failed: {e}")
-                return self._fallback_analysis(audio_data)
+                return self._fallback_analysis(audio_data, orig_sample_rate)
         else:
-            return self._fallback_analysis(audio_data)
+            return self._fallback_analysis(audio_data, orig_sample_rate)
         
-        # Restore original sample rate
-        if self.sample_rate != original_sample_rate:
-            self.sample_rate = original_sample_rate
-        
-        # Calculate metrics
-        audio_duration = len(audio_data) / self.sample_rate
+        # Calculate metrics using ORIGINAL duration
+        audio_duration = len(audio_data) / orig_sample_rate
         speech_ratio = total_speech / audio_duration if audio_duration > 0 else 0
         avg_pause = sum(pause_durations) / len(pause_durations) if pause_durations else 0
         long_pauses = sum(1 for p in pause_durations if p > 2.0)
@@ -162,15 +163,17 @@ class VADAnalyzer:
             "long_pause_count": long_pauses
         }
     
-    def _fallback_analysis(self, audio_data: np.ndarray) -> Dict[str, Any]:
+    def _fallback_analysis(self, audio_data: np.ndarray, orig_sample_rate: int = None) -> Dict[str, Any]:
         """
         Fallback analysis when VAD model unavailable
         
         Uses simple energy-based detection
         """
+        sr = orig_sample_rate if orig_sample_rate else self.sample_rate
+        
         # Calculate energy envelope
-        frame_size = int(self.sample_rate * 0.03)  # 30ms frames
-        hop_size = int(self.sample_rate * 0.01)    # 10ms hop
+        frame_size = int(sr * 0.03)  # 30ms frames
+        hop_size = int(sr * 0.01)    # 10ms hop
         
         energy = []
         for i in range(0, len(audio_data) - frame_size, hop_size):
@@ -183,7 +186,7 @@ class VADAnalyzer:
         
         total_frames = len(energy)
         speech_ratio = speech_frames / total_frames if total_frames > 0 else 0
-        audio_duration = len(audio_data) / self.sample_rate
+        audio_duration = len(audio_data) / sr
         
         return {
             "speech_segments": [],
