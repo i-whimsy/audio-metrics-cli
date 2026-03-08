@@ -16,10 +16,10 @@
 # Install from PyPI (recommended)
 pip install audio-metrics-cli
 
-# Or install from source
+# Or install from source (development)
 git clone https://github.com/i-whimsy/audio-metrics-cli.git
 cd audio-metrics-cli
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 ### Basic Usage
