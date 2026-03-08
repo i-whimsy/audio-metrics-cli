@@ -6,6 +6,25 @@ Detects speech segments and silence periods using Silero VAD
 import numpy as np
 from typing import Dict, Any, List, Tuple
 import torch
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from core.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+# Retry decorator for transient failures
+def _retry_decorator():
+    return retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((IOError, OSError)),
+        before_sleep=lambda retry_state: logger.warning(
+            "VAD retry",
+            attempt=retry_state.attempt_number,
+            remaining=3 - retry_state.attempt_number
+        )
+    )
 
 
 class VADAnalyzer:
@@ -24,6 +43,7 @@ class VADAnalyzer:
         self.model = None
         self.speech_segments = []
         
+    @_retry_decorator()
     def load_model(self):
         """Load Silero VAD model"""
         try:
@@ -35,8 +55,9 @@ class VADAnalyzer:
             )
             (get_speech_timestamps, _, _, _, _) = utils
             self.get_speech_timestamps = get_speech_timestamps
+            logger.info("Silero VAD model loaded")
         except Exception as e:
-            print(f"Warning: Failed to load Silero VAD: {e}")
+            logger.warning("Failed to load Silero VAD", error=str(e))
             self.model = None
     
     def analyze(self, audio_data: np.ndarray) -> Dict[str, Any]:

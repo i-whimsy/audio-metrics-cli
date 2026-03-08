@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "audio-metrics-cli"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cross-platform audio analysis toolkit for speech metrics extraction"
 readme = "README.md"
 license = {text = "MIT"}
@@ -45,6 +45,8 @@ dependencies = [
     "click>=8.1.0",
     "tqdm>=4.65.0",
     "pydantic>=2.0.0",
+    "structlog>=23.0.0",
+    "tenacity>=8.0.0",
 ]
 
 [project.optional-dependencies]
@@ -59,6 +61,21 @@ emotion = [
     "torchaudio>=2.0.0",
     "speechbrain>=0.5.14",
 ]
+api = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "aiofiles>=23.0.0",
+    "jinja2>=3.0.0",
+]
+extra = [
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "speechbrain>=0.5.14",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "aiofiles>=23.0.0",
+    "jinja2>=3.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/i-whimsy/audio-metrics-cli"
@@ -67,6 +84,7 @@ Documentation = "https://github.com/i-whimsy/audio-metrics-cli#readme"
 
 [project.scripts]
 audio-metrics = "audio_metrics.cli:main"
+audio-metrics-server = "audio_metrics.api.main:run_server"
 
 [tool.setuptools.packages.find]
 where = ["src"]

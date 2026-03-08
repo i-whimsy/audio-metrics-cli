@@ -7,6 +7,25 @@ import whisper
 import numpy as np
 from typing import Dict, Any, Optional
 from pathlib import Path
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+from core.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+# Retry decorator for transient failures
+def _retry_decorator():
+    return retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((IOError, OSError)),
+        before_sleep=lambda retry_state: logger.warning(
+            "STT retry",
+            attempt=retry_state.attempt_number,
+            remaining=3 - retry_state.attempt_number
+        )
+    )
 
 
 class SpeechToText:
@@ -25,13 +44,16 @@ class SpeechToText:
         self.model = None
         self.transcript = None
         
+    @_retry_decorator()
     def load_model(self):
         """Load Whisper model"""
         if self.device == "auto":
             self.model = whisper.load_model(self.model_name)
         else:
             self.model = whisper.load_model(self.model_name, device=self.device)
+        logger.info("Whisper model loaded", model=self.model_name, device=self.device)
     
+    @_retry_decorator()
     def transcribe(
         self,
         audio_path: str,
@@ -40,12 +62,12 @@ class SpeechToText:
     ) -> Dict[str, Any]:
         """
         Transcribe audio file
-        
+
         Args:
             audio_path: Path to audio file
             language: Language code (e.g., 'zh', 'en')
             task: Task type (transcribe or translate)
-            
+
         Returns:
             Transcription results
         """
