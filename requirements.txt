@@ -1,0 +1,19 @@
+# Core dependencies
+numpy>=1.23.0
+librosa>=0.10.0
+soundfile>=0.12.0
+openai-whisper>=20230314
+click>=8.1.0
+tqdm>=4.65.0
+pydantic>=2.0.0
+
+# Optional: Emotion recognition (requires torch)
+# torch>=2.0.0
+# torchaudio>=2.0.0
+# speechbrain>=0.5.14
+
+# Development
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+# black>=23.0.0
+# ruff>=0.1.0

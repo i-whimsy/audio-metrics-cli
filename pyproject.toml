@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "audio-metrics-cli"
+version = "0.1.0"
+description = "Cross-platform audio analysis toolkit for speech metrics extraction"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "OpenClaw", email = "clawbot@openclaw.ai"}
+]
+keywords = [
+    "audio",
+    "speech",
+    "analysis",
+    "metrics",
+    "whisper",
+    "vad",
+    "prosody",
+    "cli"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+dependencies = [
+    "numpy>=1.23.0",
+    "librosa>=0.10.0",
+    "soundfile>=0.12.0",
+    "openai-whisper>=20230314",
+    "click>=8.1.0",
+    "tqdm>=4.65.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+emotion = [
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "speechbrain>=0.5.14",
+]
+
+[project.urls]
+Homepage = "https://github.com/i-whimsy/audio-metrics-cli"
+Repository = "https://github.com/i-whimsy/audio-metrics-cli.git"
+Documentation = "https://github.com/i-whimsy/audio-metrics-cli#readme"
+
+[project.scripts]
+audio-metrics = "audio_metrics.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+audio_metrics = ["*.json", "*.txt"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
