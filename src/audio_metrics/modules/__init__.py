@@ -2,6 +2,7 @@
 Audio Metrics - Core Analysis Modules
 
 Cross-platform audio analysis toolkit for speech metrics extraction.
+Supports both single-speaker and multi-speaker conversation analysis.
 """
 
 from .audio_loader import AudioLoader
@@ -13,8 +14,16 @@ from .filler_detector import FillerDetector
 from .metrics_builder import MetricsBuilder
 from .json_exporter import JSONExporter
 
-__version__ = "0.1.0"
+# Multi-speaker conversation analysis modules
+from .speaker_diarization import SpeakerDiarization
+from .timeline_builder import TimelineBuilder
+from .segment_metrics import SegmentMetricsExtractor
+from .speaker_metrics import SpeakerMetricsAggregator
+from .timing_relation import TimingRelationAnalyzer
+
+__version__ = "0.3.0"
 __all__ = [
+    # Core modules
     "AudioLoader",
     "VADAnalyzer",
     "SpeechToText",
@@ -23,4 +32,11 @@ __all__ = [
     "FillerDetector",
     "MetricsBuilder",
     "JSONExporter",
+    
+    # Multi-speaker modules
+    "SpeakerDiarization",
+    "TimelineBuilder",
+    "SegmentMetricsExtractor",
+    "SpeakerMetricsAggregator",
+    "TimingRelationAnalyzer",
 ]

@@ -2,6 +2,8 @@
 Pipeline Module
 ===============
 Parallel processing pipeline using DAG scheduling.
+
+Supports both single-speaker and multi-speaker audio analysis pipelines.
 """
 
 import asyncio
@@ -336,3 +338,152 @@ async def run_parallel_analysis(
     pipeline = AudioAnalysisPipeline.create_pipeline(audio_file, config)
     results = await pipeline.execute(audio_file)
     return results.get("metrics", {})
+
+
+class MultiSpeakerPipeline:
+    """
+    Pre-configured pipeline for multi-speaker conversation analysis.
+    
+    Stage flow:
+    1. Load audio
+    2. VAD analysis
+    3. Speaker diarization
+    4. Build timeline
+    5. Extract segment metrics
+    6. Compute timing relations
+    7. Aggregate speaker metrics
+    8. Export results
+    """
+    
+    @staticmethod
+    def create_pipeline(
+        audio_file: str,
+        num_speakers: Optional[int] = None,
+        config: Optional[Dict[str, Any]] = None
+    ) -> Pipeline:
+        """
+        Create a multi-speaker analysis pipeline.
+        
+        Args:
+            audio_file: Path to audio file
+            num_speakers: Number of speakers (if known)
+            config: Optional configuration
+            
+        Returns:
+            Configured Pipeline instance
+        """
+        from modules.audio_loader import AudioLoader
+        from modules.vad_analyzer import VADAnalyzer
+        from modules.speaker_diarization import SpeakerDiarization
+        from modules.timeline_builder import TimelineBuilder
+        from modules.segment_metrics import SegmentMetricsExtractor
+        from modules.speaker_metrics import SpeakerMetricsAggregator
+        from modules.timing_relation import TimingRelationAnalyzer
+        
+        config = config or {}
+        pipeline = Pipeline(max_workers=config.get("max_workers", 4))
+        
+        # Stage 1: Load audio
+        def load_audio(input: str) -> Dict[str, Any]:
+            loader = AudioLoader(input)
+            loader.load()
+            loader.validate(max_duration=config.get("max_duration", 3600))
+            return {
+                "audio_data": loader.get_audio_data(),
+                "audio_info": loader.get_audio_info(),
+                "file_path": input
+            }
+        
+        pipeline.add_stage("load_audio", load_audio, dependencies=[])
+        
+        # Stage 2: VAD analysis
+        def run_vad(input: Dict[str, Any], dependency_results: Dict) -> Dict:
+            vad = VADAnalyzer()
+            return vad.analyze(input["audio_data"], input["audio_info"]["sample_rate"])
+        
+        pipeline.add_stage("vad", run_vad, dependencies=["load_audio"])
+        
+        # Stage 3: Speaker diarization
+        def run_diarization(input: Dict[str, Any], dependency_results: Dict) -> Dict:
+            diarizer = SpeakerDiarization()
+            return diarizer.diarize(
+                input["file_path"],
+                num_speakers=num_speakers
+            )
+        
+        pipeline.add_stage("diarization", run_diarization, dependencies=["load_audio"])
+        
+        # Stage 4: Build timeline
+        def build_timeline(input: Dict[str, Any], dependency_results: Dict) -> List[Dict]:
+            builder = TimelineBuilder()
+            return builder.build(
+                diarization_segments=dependency_results["diarization"]["segments"],
+                vad_segments=dependency_results["vad"].get("speech_segments", []),
+                audio_duration=input["audio_info"]["duration_seconds"]
+            )
+        
+        pipeline.add_stage("timeline", build_timeline, dependencies=["vad", "diarization"])
+        
+        # Stage 5: Extract segment metrics
+        def extract_segment_metrics(input: Dict[str, Any], dependency_results: Dict) -> List[Dict]:
+            extractor = SegmentMetricsExtractor(
+                sample_rate=input["audio_info"]["sample_rate"]
+            )
+            return extractor.extract(
+                input["audio_data"],
+                dependency_results["diarization"]["segments"]
+            )
+        
+        pipeline.add_stage("segment_metrics", extract_segment_metrics, dependencies=["load_audio", "diarization"])
+        
+        # Stage 6: Compute timing relations
+        def compute_timing(input: Dict[str, Any], dependency_results: Dict) -> Dict:
+            analyzer = TimingRelationAnalyzer()
+            return analyzer.analyze(dependency_results["timeline"])
+        
+        pipeline.add_stage("timing", compute_timing, dependencies=["timeline"])
+        
+        # Stage 7: Aggregate speaker metrics
+        def aggregate_speaker_metrics(input: Dict[str, Any], dependency_results: Dict) -> List[Dict]:
+            aggregator = SpeakerMetricsAggregator()
+            profiles = aggregator.aggregate(
+                dependency_results["timeline"],
+                dependency_results["segment_metrics"]
+            )
+            return aggregator.compute_conversation_roles(profiles)
+        
+        pipeline.add_stage("speaker_metrics", aggregate_speaker_metrics, dependencies=["timeline", "segment_metrics"])
+        
+        return pipeline
+
+
+async def run_multi_speaker_analysis(
+    audio_file: str,
+    num_speakers: Optional[int] = None,
+    config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Run multi-speaker conversation analysis.
+    
+    Args:
+        audio_file: Path to audio file
+        num_speakers: Number of speakers (if known)
+        config: Optional configuration
+        
+    Returns:
+        Multi-speaker analysis results
+    """
+    pipeline = MultiSpeakerPipeline.create_pipeline(audio_file, num_speakers, config)
+    results = await pipeline.execute(audio_file)
+    
+    # Aggregate results into final structure
+    return {
+        "audio_info": results["load_audio"]["audio_info"],
+        "conversation_timeline": results["timeline"],
+        "speaker_profiles": results["speaker_metrics"],
+        "conversation_metrics": {
+            "num_speakers": results["diarization"]["num_speakers"],
+            "timing": results["timing"]
+        },
+        "segment_acoustic_metrics": results["segment_metrics"]
+    }

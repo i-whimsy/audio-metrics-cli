@@ -38,6 +38,7 @@ classifiers = [
 ]
 
 dependencies = [
+    # Core dependencies
     "numpy>=1.23.0",
     "librosa>=0.10.0",
     "soundfile>=0.12.0",
@@ -47,6 +48,14 @@ dependencies = [
     "pydantic>=2.0.0",
     "structlog>=23.0.0",
     "tenacity>=8.0.0",
+    # Speaker diarization (CRITICAL for multi-speaker analysis)
+    # NOTE: If pip install fails due to network issues, install manually:
+    #   pip install torch torchaudio
+    #   pip install pyannote.audio
+    # Or use CPU-only: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+    "pyannote.audio>=3.0.0",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
 ]
 
 [project.optional-dependencies]

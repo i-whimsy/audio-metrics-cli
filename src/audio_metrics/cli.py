@@ -15,6 +15,7 @@ import glob
 import os
 import sys
 import json
+import time
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
@@ -37,6 +38,11 @@ from modules.emotion_analyzer import EmotionAnalyzer
 from modules.filler_detector import FillerDetector
 from modules.metrics_builder import MetricsBuilder
 from modules.json_exporter import JSONExporter
+from modules.speaker_diarization import SpeakerDiarization
+from modules.timeline_builder import TimelineBuilder
+from modules.segment_metrics import SegmentMetricsExtractor
+from modules.speaker_metrics import SpeakerMetricsAggregator
+from modules.timing_relation import TimingRelationAnalyzer
 from exporters.csv_exporter import BatchCSVExporter
 from exporters.html_exporter import BatchHTMLExporter
 
@@ -146,7 +152,7 @@ def _analyze_single_file(
     return metrics
 
 
-@main.command()
+@main.command("analyze")
 @click.argument("audio_file", type=click.Path(exists=True), required=False)
 @click.option("-o", "--output", "output_file", type=click.Path(), default=None, help="Output file path")
 @click.option("-c", "--config", "config_file", type=click.Path(exists=True), default=None, help="Configuration file")
@@ -337,6 +343,231 @@ def analyze(
             import traceback
             traceback.print_exc()
         sys.exit(1)
+
+
+@main.command("analyze-multi")
+@click.argument("audio_file", type=click.Path(exists=True))
+@click.option("-o", "--output", "output_file", type=click.Path(), default=None, help="Output JSON file")
+@click.option("--num-speakers", type=int, default=None, help="Number of speakers (if known)")
+@click.option("--min-speakers", type=int, default=None, help="Minimum number of speakers")
+@click.option("--max-speakers", type=int, default=None, help="Maximum number of speakers")
+@click.option("--show-progress", is_flag=True, help="Show progress steps")
+@click.pass_context
+def analyze_multi(
+    ctx,
+    audio_file,
+    output_file,
+    num_speakers,
+    min_speakers,
+    max_speakers,
+    show_progress
+):
+    """
+    Analyze multi-speaker conversation and extract dialogue timeline.
+    
+    Performs speaker diarization, builds conversation timeline, and extracts
+    acoustic metrics for each speaker. Outputs structured JSON with:
+    
+    - audio_info: Audio metadata
+    - conversation_timeline: Chronological sequence of speech segments
+    - speaker_profiles: Per-speaker statistics and acoustic features
+    - conversation_metrics: Overall conversation dynamics
+    - global_acoustic_metrics: Aggregate acoustic features
+    - processing_meta: Processing information
+    
+    AUDIO_FILE: Path to audio file (wav, mp3, m4a, flac, etc.)
+    """
+    verbose = ctx.obj.get("verbose", False)
+    
+    click.echo("=" * 60)
+    click.echo("Audio Metrics CLI - Multi-Speaker Analysis v0.3.0")
+    click.echo("=" * 60)
+    click.echo(f"Input: {Path(audio_file).name}")
+    click.echo("")
+    
+    start_time = time.time()
+    
+    try:
+        # STEP 1: Loading audio
+        if show_progress:
+            click.echo("STEP 1 Loading audio...")
+        loader = AudioLoader(audio_file)
+        loader.load()
+        audio_info = loader.get_audio_info()
+        audio_data = loader.get_audio_data()
+        if show_progress:
+            click.echo(f"  Duration: {audio_info['duration_seconds']:.2f}s")
+            click.echo(f"  Sample rate: {audio_info['sample_rate']} Hz")
+        
+        # STEP 2: Extracting audio metadata
+        if show_progress:
+            click.echo("STEP 2 Extracting audio metadata...")
+        # Already done in loader.get_audio_info()
+        
+        # STEP 3: Voice activity detection
+        if show_progress:
+            click.echo("STEP 3 Voice activity detection...")
+        vad = VADAnalyzer()
+        vad_analysis = vad.analyze(audio_data, audio_info['sample_rate'])
+        if show_progress:
+            click.echo(f"  Speech ratio: {vad_analysis['speech_ratio']:.1%}")
+        
+        # STEP 4: Speaker diarization
+        if show_progress:
+            click.echo("STEP 4 Speaker diarization...")
+        diarizer = SpeakerDiarization()
+        diarization_result = diarizer.diarize(
+            audio_file,
+            num_speakers=num_speakers,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers
+        )
+        if show_progress:
+            click.echo(f"  Number of speakers: {diarization_result['num_speakers']}")
+        
+        # STEP 5: Building conversation timeline
+        if show_progress:
+            click.echo("STEP 5 Building conversation timeline...")
+        timeline_builder = TimelineBuilder()
+        conversation_timeline = timeline_builder.build(
+            diarization_segments=diarization_result['segments'],
+            vad_segments=vad_analysis.get('speech_segments', []),
+            audio_duration=audio_info['duration_seconds']
+        )
+        timeline_stats = timeline_builder.get_statistics()
+        if show_progress:
+            click.echo(f"  Timeline segments: {len(conversation_timeline)}")
+        
+        # STEP 6: Extracting segment acoustic metrics
+        if show_progress:
+            click.echo("STEP 6 Extracting segment acoustic metrics...")
+        segment_extractor = SegmentMetricsExtractor(sample_rate=audio_info['sample_rate'])
+        segment_acoustic_metrics = segment_extractor.extract(
+            audio_data,
+            diarization_result['segments']
+        )
+        if show_progress:
+            click.echo(f"  Segments analyzed: {len(segment_acoustic_metrics)}")
+        
+        # STEP 7: Computing timing relations
+        if show_progress:
+            click.echo("STEP 7 Computing timing relations...")
+        timing_analyzer = TimingRelationAnalyzer()
+        timing_metrics = timing_analyzer.analyze(conversation_timeline)
+        if show_progress:
+            flow = timing_metrics.get('conversational_flow', {})
+            click.echo(f"  Fluency score: {flow.get('fluency_score', 0):.3f}")
+        
+        # STEP 8: Aggregating speaker metrics
+        if show_progress:
+            click.echo("STEP 8 Aggregating speaker metrics...")
+        speaker_aggregator = SpeakerMetricsAggregator()
+        speaker_profiles = speaker_aggregator.aggregate(
+            conversation_timeline,
+            segment_acoustic_metrics
+        )
+        speaker_profiles = speaker_aggregator.compute_conversation_roles(speaker_profiles)
+        if show_progress:
+            click.echo(f"  Speaker profiles: {len(speaker_profiles)}")
+        
+        # Compute global acoustic metrics
+        global_acoustic_metrics = _compute_global_acoustic_metrics(segment_acoustic_metrics)
+        
+        # Build conversation metrics
+        conversation_metrics = {
+            "num_speakers": diarization_result['num_speakers'],
+            "total_turns": timeline_stats.get('speech_segments', 0) + timeline_stats.get('overlap_segments', 0),
+            "speaker_changes": timing_metrics.get('turn_taking', {}).get('speaker_changes', 0),
+            "overlap_ratio": timing_metrics.get('overlap_statistics', {}).get('overlap_ratio', 0),
+            "mean_response_latency": timing_metrics.get('response_latency', {}).get('mean_response_latency', 0),
+            "fluency_score": timing_metrics.get('conversational_flow', {}).get('fluency_score', 0),
+            "engagement_score": timing_metrics.get('conversational_flow', {}).get('engagement_score', 0),
+            "balance_score": timing_metrics.get('conversational_flow', {}).get('balance_score', 0)
+        }
+        
+        # Processing metadata
+        processing_time = time.time() - start_time
+        processing_meta = {
+            "version": "0.3.0",
+            "analyzer": "audio-metrics-multi-speaker",
+            "timestamp": datetime.now().isoformat(),
+            "processing_time_seconds": round(processing_time, 2),
+            "model": "pyannote/speaker-diarization-3.1"
+        }
+        
+        # STEP 9: Exporting JSON
+        if show_progress:
+            click.echo("STEP 9 Exporting JSON...")
+        
+        if output_file is None:
+            audio_path = Path(audio_file)
+            output_dir = Path("outputs") / audio_path.stem
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / "multi_speaker_analysis.json"
+        
+        exporter = JSONExporter()
+        output_path = exporter.export_multi_speaker(
+            audio_info=audio_info,
+            conversation_timeline=conversation_timeline,
+            speaker_profiles=speaker_profiles,
+            conversation_metrics=conversation_metrics,
+            global_acoustic_metrics=global_acoustic_metrics,
+            processing_meta=processing_meta,
+            output_path=str(output_file)
+        )
+        
+        # Summary
+        click.echo("")
+        click.echo("=" * 60)
+        click.echo("Analysis Complete")
+        click.echo("=" * 60)
+        click.echo(f"Duration: {audio_info['duration_seconds']:.1f}s")
+        click.echo(f"Speakers: {conversation_metrics['num_speakers']}")
+        click.echo(f"Total turns: {conversation_metrics['total_turns']}")
+        click.echo(f"Fluency: {conversation_metrics['fluency_score']:.3f}")
+        click.echo(f"Engagement: {conversation_metrics['engagement_score']:.3f}")
+        click.echo(f"Balance: {conversation_metrics['balance_score']:.3f}")
+        click.echo(f"Processing time: {processing_time:.2f}s")
+        click.echo("")
+        click.echo(f"[OK] Exported: {output_path}")
+        click.echo("")
+        
+    except Exception as e:
+        click.echo(f"[ERROR] {e}", err=True)
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+
+def _compute_global_acoustic_metrics(segment_metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute global acoustic metrics from segment metrics."""
+    import numpy as np
+    
+    if not segment_metrics:
+        return {
+            "pitch_mean_hz": 0,
+            "pitch_std_hz": 0,
+            "pitch_min_hz": 0,
+            "pitch_max_hz": 0,
+            "energy_mean": 0,
+            "energy_cv": 0,
+            "spectral_centroid_mean": 0
+        }
+    
+    pitch_values = [m.get("pitch_mean_hz", 0) for m in segment_metrics if m.get("pitch_mean_hz", 0) > 0]
+    energy_values = [m.get("energy_mean", 0) for m in segment_metrics]
+    spectral_values = [m.get("spectral_centroid_mean", 0) for m in segment_metrics]
+    
+    return {
+        "pitch_mean_hz": round(np.mean(pitch_values), 2) if pitch_values else 0,
+        "pitch_std_hz": round(np.std(pitch_values), 2) if pitch_values else 0,
+        "pitch_min_hz": round(min(pitch_values), 2) if pitch_values else 0,
+        "pitch_max_hz": round(max(pitch_values), 2) if pitch_values else 0,
+        "energy_mean": round(np.mean(energy_values), 6) if energy_values else 0,
+        "energy_cv": round(np.std(energy_values) / np.mean(energy_values), 3) if np.mean(energy_values) > 0 else 0,
+        "spectral_centroid_mean": round(np.mean(spectral_values), 2) if spectral_values else 0
+    }
 
 
 @main.command("voice-acoustic")
