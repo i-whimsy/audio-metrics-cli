@@ -1,10 +1,12 @@
-# Audio Metrics CLI
+# Audio Metrics CLI v3
 
-🎙️ **Cross-platform audio analysis toolkit for speech metrics extraction**
+🎙️ **Professional Voice Analysis Engine**
 
 [![PyPI version](https://badge.fury.io/py/audio-metrics-cli.svg)](https://badge.fury.io/py/audio-metrics-cli)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+> **v3.0 Architecture**: CLI → Pipeline → Modules
 
 ---
 
@@ -60,6 +62,43 @@ audio-metrics compare v1.wav v2.wav
 ```
 
 ---
+
+## 🏛️ Architecture v3
+
+Audio Metrics CLI v3 features a clean three-layer architecture:
+
+```
+┌─────────────────────────────────────┐
+│         CLI Layer                   │  (cli/cli.py)
+│   Argument parsing & orchestration  │
+└─────────────────────────────────────┘
+                ↓
+┌─────────────────────────────────────┐
+│      Pipeline Layer                 │  (core/pipeline.py)
+│   Analysis flow orchestration       │
+└─────────────────────────────────────┘
+                ↓
+┌─────────────────────────────────────┐
+│       Module Layer                  │  (modules/*)
+│   Individual analysis components    │
+└─────────────────────────────────────┘
+```
+
+### Key Features
+
+- **30+ Voice Metrics**: Pitch, energy, spectral, rhythm, voice quality
+- **Conversation Dynamics**: Interruptions, response latency, turn-taking
+- **Speaker Diarization**: Automatic speaker detection with pyannote
+- **Offline-First**: All models cached locally
+- **Rich JSON Output**: Structured analysis results
+
+### Pipeline Flow
+
+```
+Audio → VAD → Diarization → Timeline → STT → Metrics → Dynamics → JSON
+```
+
+**Full Documentation**: See [`docs/architecture_v3.md`](docs/architecture_v3.md)
 
 ---
 
