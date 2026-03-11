@@ -3,8 +3,10 @@ VAD (Voice Activity Detection) Analyzer Module
 Detects speech segments and silence periods using Silero VAD
 """
 
+import os
 import numpy as np
 from typing import Dict, Any, List, Tuple
+from pathlib import Path
 import torch
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -45,17 +47,24 @@ class VADAnalyzer:
         
     @_retry_decorator()
     def load_model(self):
-        """Load Silero VAD model"""
+        """Load Silero VAD model with offline-first strategy"""
         try:
+            # Set offline environment variables
+            os.environ['HF_HUB_OFFLINE'] = '1'
+            os.environ['TRANSFORMERS_OFFLINE'] = '1'
+            os.environ['TORCH_HOME'] = str(Path.home() / ".cache" / "torch")
+            
+            # Load from cache (force_reload=False means use cache if available)
             self.model, utils = torch.hub.load(
                 repo_or_dir='snakers4/silero-vad',
                 model='silero_vad',
-                force_reload=False,
-                trust_repo=True
+                force_reload=False,  # Use cached version
+                trust_repo=True,
+                verbose=False  # Suppress verbose output
             )
             (get_speech_timestamps, _, _, _, _) = utils
             self.get_speech_timestamps = get_speech_timestamps
-            logger.info("Silero VAD model loaded")
+            logger.info("Silero VAD model loaded from cache")
         except Exception as e:
             logger.warning("Failed to load Silero VAD", error=str(e))
             self.model = None

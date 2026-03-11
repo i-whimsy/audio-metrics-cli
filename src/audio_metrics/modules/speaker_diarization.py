@@ -8,6 +8,7 @@ Uses pyannote.audio when available, falls back to simple VAD-based segmentation.
 Outputs speaker segments with timestamps and speaker labels.
 """
 
+import os
 import numpy as np
 from typing import Dict, Any, List, Optional
 from pathlib import Path
@@ -38,15 +39,21 @@ class SpeakerDiarization:
         self.use_fallback = False
         
     def load_model(self):
-        """Load speaker diarization model (pyannote or fallback)."""
+        """Load speaker diarization model (pyannote or fallback) with offline-first strategy."""
         if self.model is not None:
             return
+        
+        import torch
+        
+        # Set offline environment variables
+        os.environ['HF_HUB_OFFLINE'] = '1'
+        os.environ['TRANSFORMERS_OFFLINE'] = '1'
+        os.environ['TORCH_HOME'] = str(Path.home() / ".cache" / "torch")
             
         try:
-            import torch
             from pyannote.audio import Pipeline
             
-            # Load pretrained pipeline
+            # Load pretrained pipeline (will use cache if available)
             self.model = Pipeline.from_pretrained(self.model_name)
             
             # Move to GPU if available
@@ -119,11 +126,12 @@ class SpeakerDiarization:
             self.segments = []
             speaker_times = {}
             
-            # pyannote v4.0 uses different API
-            # Check if itertracks exists (v3.x) or need to use new API (v4.0)
+            # pyannote v4.0+: diarization.speaker_diarization is a property that returns Annotation
+            # Use annotation.itertracks(yield_label=True) to iterate
             try:
-                # Try v3.x API first
-                for turn, _, speaker in diarization.itertracks(yield_label=True):
+                # Try pyannote v4.0+ API first
+                annotation = diarization.speaker_diarization
+                for turn, track, speaker in annotation.itertracks(yield_label=True):
                     segment = {
                         "start": round(turn.start, 3),
                         "end": round(turn.end, 3),
@@ -137,31 +145,31 @@ class SpeakerDiarization:
                         speaker_times[speaker] = {"first": turn.start, "last": turn.end}
                     else:
                         speaker_times[speaker]["last"] = max(speaker_times[speaker]["last"], turn.end)
-            except AttributeError:
-                # pyannote v4.0+ API - use track_iter() or direct iteration
+                        
                 logger.info("Using pyannote v4.0+ API")
+                
+            except AttributeError:
+                # Fallback to v3.x API - try itertracks directly on diarization
                 try:
-                    # Try the new v4.0 API
-                    for segment in diarization:
-                        if hasattr(segment, 'start') and hasattr(segment, 'end'):
-                            start = segment.start
-                            end = segment.end
-                            speaker = getattr(segment, 'speaker', f"speaker_{len(speaker_times)}")
+                    for turn, track, speaker in diarization.itertracks(yield_label=True):
+                        segment = {
+                            "start": round(turn.start, 3),
+                            "end": round(turn.end, 3),
+                            "duration": round(turn.end - turn.start, 3),
+                            "speaker": speaker
+                        }
+                        self.segments.append(segment)
+                        
+                        if speaker not in speaker_times:
+                            speaker_times[speaker] = {"first": turn.start, "last": turn.end}
+                        else:
+                            speaker_times[speaker]["last"] = max(speaker_times[speaker]["last"], turn.end)
                             
-                            seg_dict = {
-                                "start": round(start, 3),
-                                "end": round(end, 3),
-                                "duration": round(end - start, 3),
-                                "speaker": speaker
-                            }
-                            self.segments.append(seg_dict)
-                            
-                            if speaker not in speaker_times:
-                                speaker_times[speaker] = {"first": start, "last": end}
-                            else:
-                                speaker_times[speaker]["last"] = max(speaker_times[speaker]["last"], end)
-                except Exception as e_v4:
-                    logger.warning("pyannote v4.0 API also failed, using fallback", error=str(e_v4))
+                    logger.info("Using pyannote v3.x API")
+                    
+                except AttributeError:
+                    # Both APIs failed, use fallback
+                    logger.warning("pyannote API failed, using fallback")
                     return self._fallback_diarize(
                         str(audio_path),
                         num_speakers=num_speakers,

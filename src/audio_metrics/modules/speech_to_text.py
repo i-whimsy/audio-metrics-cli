@@ -3,6 +3,7 @@ Speech to Text Module
 Transcribes audio using OpenAI Whisper
 """
 
+import os
 import whisper
 import numpy as np
 from typing import Dict, Any, Optional
@@ -46,12 +47,27 @@ class SpeechToText:
         
     @_retry_decorator()
     def load_model(self):
-        """Load Whisper model"""
+        """Load Whisper model with offline-first strategy"""
+        # Set cache directory
+        cache_dir = Path.home() / ".cache" / "whisper"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Set offline environment
+        os.environ['HF_HUB_OFFLINE'] = '1'
+        
         if self.device == "auto":
-            self.model = whisper.load_model(self.model_name)
+            self.model = whisper.load_model(
+                self.model_name,
+                download_root=str(cache_dir)
+            )
         else:
-            self.model = whisper.load_model(self.model_name, device=self.device)
-        logger.info("Whisper model loaded", model=self.model_name, device=self.device)
+            self.model = whisper.load_model(
+                self.model_name,
+                device=self.device,
+                download_root=str(cache_dir)
+            )
+        
+        logger.info("Whisper model loaded", model=self.model_name, device=self.device, cache=str(cache_dir))
     
     @_retry_decorator()
     def transcribe(
